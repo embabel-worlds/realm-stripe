@@ -112,11 +112,28 @@ click Authorize.
      should only browse Stripe data, never write. To switch, edit the
      `scopes:` value in `apis/apis.yml`.
 
-5. **Copy** the platform's client ID — it looks like
-   `ca_xxxxxxxxxxxxxxxxxxxxxxxxxx`. The corresponding secret is your
-   Stripe **secret key** (`sk_live_...` or `sk_test_...`) — Stripe Connect
-   uses your platform secret key as the client secret on the OAuth token
-   endpoint.
+5. **Grab the two halves of the OAuth credential pair.**
+
+   Stripe Connect splits these across two different dashboard pages,
+   which trips everyone up the first time:
+
+   - **`client_id`** — comes from
+     <https://dashboard.stripe.com/settings/connect> (the page from step 1).
+     Look for "Test mode client ID" / "Live mode client ID" — it's
+     prefixed `ca_xxxxxxxxxxxxxxxxxxxxxxxxxx`. There's a separate one
+     for each mode; copy the one matching the environment you're
+     setting up.
+   - **`client_secret`** — there is **no separate "OAuth client secret"
+     field anywhere in the Connect UI.** Stripe reuses your account's
+     **regular secret API key** as the OAuth client secret. Get it from
+     <https://dashboard.stripe.com/apikeys> — "Secret key", prefixed
+     `sk_test_...` (test mode) or `sk_live_...` (live mode). Use the
+     **standard** key, not a restricted key.
+
+   Yes, this means your platform's full-power secret key is also the
+   OAuth client secret. That's how Stripe Connect works — it's
+   documented [here](https://docs.stripe.com/connect/oauth-reference#post-token)
+   ("Use your live or test secret API key as the `client_secret`").
 
 6. **Add them to** `{workspaceBase}/admin/oauth-apps.yml` (the same admin
    directory that holds `pack-sources.yml`, `themes/`, `hints/`, etc.):
@@ -131,11 +148,10 @@ click Authorize.
    Hot-reloaded — no restart needed. Every workspace will see "Authorize"
    appear in Settings → Connected Services.
 
-   **Use your test-mode secret key in dev**, your live-mode one in
-   production. Stripe Connect runs separate OAuth flows per mode — connecting
-   a test account against a live platform won't work. The simplest pattern
-   is one assistant deployment per mode, each pointing at the matching
-   Stripe environment.
+   **Match the modes.** Test-mode `ca_*` pairs with `sk_test_*`. Live-mode
+   `ca_*` pairs with `sk_live_*`. Crossing them will fail at the token
+   exchange step. Simplest pattern: one assistant deployment per mode,
+   each pointing at the matching Stripe environment.
 
 7. **Test the flow.**
    - Restart any client browsers, open Settings → Connected Services, click
