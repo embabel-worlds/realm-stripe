@@ -67,11 +67,22 @@ registered a Stripe Connect platform yet — show them the next section.
 Done once per installation. Every workspace inherits — end users just
 click Authorize.
 
+> **⚠️ Don't use Stripe Sandboxes for this.** Stripe's newer "Sandbox"
+> environments are isolated from your main account's Connect platform —
+> they have their own keys (prefixed `mk_*`) that the OAuth token endpoint
+> doesn't recognise, so token exchange fails with `invalid_client: No such
+> API key`. Use **regular Test mode** (the test/live toggle on your main
+> account) instead. Same goes for the redirect URI: register it on the
+> regular Test-mode Connect page, not inside a Sandbox.
+
 1. **Register a Stripe Connect platform.**
-   - Go to <https://dashboard.stripe.com/settings/applications> (use the
-     Stripe account you want users connecting **to** — for "users connect
-     their own Stripe", this is your platform account, not a destination
-     account).
+   - Confirm the dashboard top bar reads "TEST MODE" (not "Sandbox: …").
+     If you're inside a Sandbox, click the account/mode switcher at top
+     left and switch to your main account, then toggle Test mode.
+   - Go to <https://dashboard.stripe.com/test/settings/connect/onboarding-options/oauth>
+     (use the Stripe account you want users connecting **to** — for
+     "users connect their own Stripe", this is your platform account, not
+     a destination account).
    - Click **Get started with Connect** if you haven't already.
    - Under **OAuth settings**, configure:
 
@@ -87,6 +98,14 @@ click Authorize.
 
    Stripe lets you register multiple redirect URIs — add both prod and dev
    so the same Connect platform serves both environments.
+
+   **Exact match.** Stripe compares the registered URI against the one the
+   assistant sends byte-for-byte. The assistant always sends
+   `http://localhost:<serverPort>/api/v1/auth/oauth2/callback` — no
+   trailing slash, lowercase, http (not https) for localhost. Pasting a
+   trailing slash into Stripe's form, or accidentally registering on the
+   live-mode Connect page when you wanted test, produces
+   `Invalid redirect URI`.
 
 3. **Choose the integration type**
 
@@ -118,17 +137,19 @@ click Authorize.
    which trips everyone up the first time:
 
    - **`client_id`** — comes from
-     <https://dashboard.stripe.com/settings/connect> (the page from step 1).
-     Look for "Test mode client ID" / "Live mode client ID" — it's
-     prefixed `ca_xxxxxxxxxxxxxxxxxxxxxxxxxx`. There's a separate one
-     for each mode; copy the one matching the environment you're
-     setting up.
+     <https://dashboard.stripe.com/test/settings/connect/onboarding-options/oauth>
+     (the same page where you registered the redirect URI). Look for
+     "Test mode client ID" / "Live mode client ID" — it's prefixed
+     `ca_xxxxxxxxxxxxxxxxxxxxxxxxxx`. There's a separate one for each
+     mode; copy the one matching the environment you're setting up.
    - **`client_secret`** — there is **no separate "OAuth client secret"
      field anywhere in the Connect UI.** Stripe reuses your account's
      **regular secret API key** as the OAuth client secret. Get it from
-     <https://dashboard.stripe.com/apikeys> — "Secret key", prefixed
+     <https://dashboard.stripe.com/test/apikeys> — "Secret key", prefixed
      `sk_test_...` (test mode) or `sk_live_...` (live mode). Use the
-     **standard** key, not a restricted key.
+     **standard** key, not a restricted key (`rk_*`) and not a
+     Sandbox-scoped key (`mk_*`) — both will be rejected by the OAuth
+     token endpoint with `invalid_client: No such API key`.
 
    Yes, this means your platform's full-power secret key is also the
    OAuth client secret. That's how Stripe Connect works — it's
