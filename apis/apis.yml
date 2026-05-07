@@ -1,0 +1,40 @@
+# Stripe — vendored OpenAPI spec, OAuth2 via Stripe Connect.
+#
+# Stripe publishes a 100k+ line OpenAPI dump at
+# https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
+# that lists ~600 operations. Feeding that to an LLM as tool definitions is
+# wasteful — the chat-driven 95% lives in maybe 20 ops.
+#
+# Strategy: hand-curated mini-spec covering customers, subscriptions,
+# invoices, charges, refunds, payouts, balance, products/prices, and
+# payment links. All money fields documented as integer minor units
+# (cents) to stop the LLM from sending "$25" or "25.00".
+#
+# Auth: OAuth2 via Stripe Connect ("Standard" flow). The deployment
+# operator registers ONE Stripe Connect platform per installation;
+# every end user clicks "Authorize" once and the assistant holds an
+# `sk_live_...` (or `sk_test_...`) for that user's connected account.
+# Client credentials live in `{workspaceBase}/admin/oauth-apps.yml`
+# under `apps.stripe.*` — NEVER in this file.
+#
+# Stripe's `access_token` IS a usable secret key (Stripe Connect
+# Standard) — there's no separate API token to mint. Token refresh is
+# not required: Stripe Connect access tokens for Standard accounts do
+# not expire (the user can revoke from their Stripe dashboard).
+#
+# The `identity:` block hits `/v1/account` to discover the connected
+# account's display name and email — same pattern as every other pack.
+- url: stripe.json
+  name: stripe
+  type: openapi
+  auth: oauth2
+  oauth2:
+    auth-url: https://connect.stripe.com/oauth/authorize
+    token-url: https://connect.stripe.com/oauth/token
+    scopes: read_write
+    identity:
+      url: https://api.stripe.com/v1/account
+      method: GET
+      auth: bearer
+      account-id-field: id
+      display-name-field: email

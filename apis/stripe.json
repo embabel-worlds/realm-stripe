@@ -1,0 +1,803 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Stripe — curated",
+    "version": "0.1.0",
+    "description": "Hand-curated subset of Stripe's API covering ~95% of chat-driven billing workflows: customers (incl. search), subscriptions, invoices, invoice items, charges, refunds, payouts, balance, products, prices, and payment links. ALL request bodies are `application/x-www-form-urlencoded` — Stripe explicitly rejects JSON. Money fields are integer minor units (e.g. `2500` = $25.00). Nested objects and lists use Rails / Stripe bracket form syntax (`metadata[key]=v`, `line_items[0][price]=p`); the assistant's OpenAPI runtime handles flattening. Object IDs use prefixes (cus_*, sub_*, in_*, ch_*, re_*, po_*, prod_*, price_*, plink_*)."
+  },
+  "servers": [{ "url": "https://api.stripe.com" }],
+  "security": [{ "BearerAuth": [] }],
+  "tags": [
+    { "name": "Customers", "description": "Customer records — the parent of subscriptions, invoices, and charges." },
+    { "name": "Subscriptions", "description": "Recurring billing relationships. Status drives dunning state and MRR." },
+    { "name": "Invoices", "description": "Periodic and one-off invoices. Pay, send, and create out-of-cycle invoices." },
+    { "name": "Charges", "description": "Individual payment attempts. Read-only here — never create a Charge directly in modern flows; use Invoices or PaymentLinks." },
+    { "name": "Refunds", "description": "Reverse a charge in part or in full. Money-moving — confirm with the user." },
+    { "name": "Payouts", "description": "Money flowing from your Stripe balance to your bank. Read-only." },
+    { "name": "Balance", "description": "Your platform's current available and pending balance." },
+    { "name": "Catalogue", "description": "Products and Prices — the catalogue subscriptions and payment links reference." },
+    { "name": "PaymentLinks", "description": "Hosted Stripe-managed payment pages. Generate one and send the URL." }
+  ],
+  "paths": {
+    "/v1/customers": {
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "customersList",
+        "summary": "List customers, optionally filtered by email.",
+        "description": "Paginated by `limit` (max 100) and `starting_after` (a cursor that's the id of the last item from the previous page).",
+        "parameters": [
+          { "name": "email", "in": "query", "schema": { "type": "string" }, "description": "Exact-match email filter." },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerList" } } } }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "customersCreate",
+        "summary": "Create a customer.",
+        "description": "All fields optional but `email` is strongly recommended — Stripe uses it for receipts and dashboard search. `metadata` is an arbitrary string→string map for your own tagging.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/CustomerInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } }
+        }
+      }
+    },
+    "/v1/customers/{customer}": {
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "customersGet",
+        "summary": "Get a customer by id.",
+        "parameters": [{ "$ref": "#/components/parameters/CustomerId" }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "404": { "description": "Not found" }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "customersUpdate",
+        "summary": "Update a customer.",
+        "description": "Only the fields you pass are touched. Use this to change email, name, default payment method, or metadata.",
+        "parameters": [{ "$ref": "#/components/parameters/CustomerId" }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/CustomerInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } }
+        }
+      }
+    },
+    "/v1/customers/search": {
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "customersSearch",
+        "summary": "Search customers using Stripe's search DSL.",
+        "description": "Use Stripe's search query syntax: `email:'alice@acme.com'`, `name~'acme'` (substring), `metadata['plan']:'enterprise'`. Combine with `AND` / `OR`. Returns paged results.",
+        "parameters": [
+          { "name": "query", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Stripe search query, e.g. `email:'a@b.com'` or `metadata['plan']:'enterprise'`." },
+          { "$ref": "#/components/parameters/Limit" },
+          { "name": "page", "in": "query", "schema": { "type": "string" }, "description": "Search-API page cursor — different from `starting_after` used elsewhere." }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CustomerSearchResult" } } } }
+        }
+      }
+    },
+    "/v1/subscriptions": {
+      "get": {
+        "tags": ["Subscriptions"],
+        "operationId": "subscriptionsList",
+        "summary": "List subscriptions, filtered by customer or status.",
+        "description": "For dunning queries pass `status: \"past_due\"` or `\"unpaid\"`. For all (including canceled) pass `status: \"all\"`. Default returns active + trialing only.",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" }, "description": "Customer id (cus_*) — list this customer's subscriptions only." },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "trialing", "all", "ended", "paused"] } },
+          { "name": "price", "in": "query", "schema": { "type": "string" }, "description": "Price id — list subscriptions on this price only (useful for plan-cohort questions)." },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SubscriptionList" } } } }
+        }
+      }
+    },
+    "/v1/subscriptions/{subscription_exposed_id}": {
+      "get": {
+        "tags": ["Subscriptions"],
+        "operationId": "subscriptionsGet",
+        "summary": "Get a subscription by id.",
+        "parameters": [{ "$ref": "#/components/parameters/SubscriptionId" }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Subscription" } } } }
+        }
+      },
+      "post": {
+        "tags": ["Subscriptions"],
+        "operationId": "subscriptionsUpdate",
+        "summary": "Update a subscription.",
+        "description": "Common updates: `cancel_at_period_end: true` (graceful churn), `pause_collection[behavior]: \"keep_as_draft\"`, swap items/quantity. Pricing-changing updates may prorate — pass `proration_behavior: \"none\"` to skip.",
+        "parameters": [{ "$ref": "#/components/parameters/SubscriptionId" }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/SubscriptionInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Subscription" } } } }
+        }
+      },
+      "delete": {
+        "tags": ["Subscriptions"],
+        "operationId": "subscriptionsCancel",
+        "summary": "Cancel a subscription immediately.",
+        "description": "Hard cancel — the subscription stops billing now and `status` becomes `canceled`. Prefer `subscriptionsUpdate` with `cancel_at_period_end: true` for graceful churn unless the user explicitly wants immediate.",
+        "parameters": [{ "$ref": "#/components/parameters/SubscriptionId" }],
+        "responses": {
+          "200": { "description": "Canceled", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Subscription" } } } }
+        }
+      }
+    },
+    "/v1/invoices": {
+      "get": {
+        "tags": ["Invoices"],
+        "operationId": "invoicesList",
+        "summary": "List invoices, filtered by customer/status/date.",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["draft", "open", "paid", "uncollectible", "void"] } },
+          { "name": "subscription", "in": "query", "schema": { "type": "string" }, "description": "Filter to invoices for a specific subscription." },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceList" } } } }
+        }
+      },
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "invoicesCreate",
+        "summary": "Create an invoice from pending invoice items.",
+        "description": "Two-step out-of-cycle billing: (1) create one or more invoice items via `invoiceItemsCreate` against the customer; (2) call this op to wrap them into a single invoice. Pass `auto_advance: true` to have Stripe finalise and attempt collection automatically.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/InvoiceCreateInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } }
+        }
+      }
+    },
+    "/v1/invoices/{invoice}": {
+      "get": {
+        "tags": ["Invoices"],
+        "operationId": "invoicesGet",
+        "summary": "Get an invoice by id.",
+        "parameters": [{ "$ref": "#/components/parameters/InvoiceId" }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } }
+        }
+      }
+    },
+    "/v1/invoices/{invoice}/pay": {
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "invoicesPay",
+        "summary": "Attempt payment on an open invoice.",
+        "description": "Charges the customer's default payment method now. Use to retry after a failed dunning attempt. Returns the (possibly updated) invoice — check `status` and `attempt_count`.",
+        "parameters": [{ "$ref": "#/components/parameters/InvoiceId" }],
+        "requestBody": {
+          "required": false,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/InvoicePayInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Paid (or retry attempted)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } }
+        }
+      }
+    },
+    "/v1/invoices/{invoice}/send": {
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "invoicesSend",
+        "summary": "Email the hosted invoice link to the customer.",
+        "description": "Triggers Stripe to send the invoice email (via the customer's email on file). Useful for `collection_method: \"send_invoice\"` flows where the customer pays via the hosted invoice page.",
+        "parameters": [{ "$ref": "#/components/parameters/InvoiceId" }],
+        "responses": {
+          "200": { "description": "Sent", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invoice" } } } }
+        }
+      }
+    },
+    "/v1/invoiceitems": {
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "invoiceItemsCreate",
+        "summary": "Create a pending invoice item against a customer.",
+        "description": "Step 1 of out-of-cycle billing. Pass `customer` and EITHER (`amount` + `currency` for an ad-hoc line) OR `price` (id of a Price object). Repeat for each line, then call `invoicesCreate`.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/InvoiceItemInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InvoiceItem" } } } }
+        }
+      }
+    },
+    "/v1/charges": {
+      "get": {
+        "tags": ["Charges"],
+        "operationId": "chargesList",
+        "summary": "List charges, optionally filtered by customer.",
+        "description": "Use to inspect payment history. For 'failed charges this week' filter via the search endpoint instead — list does not accept a `status` filter, only customer.",
+        "parameters": [
+          { "name": "customer", "in": "query", "schema": { "type": "string" } },
+          { "name": "payment_intent", "in": "query", "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChargeList" } } } }
+        }
+      }
+    },
+    "/v1/charges/{charge}": {
+      "get": {
+        "tags": ["Charges"],
+        "operationId": "chargesGet",
+        "summary": "Get a charge by id.",
+        "parameters": [{ "name": "charge", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Charge" } } } }
+        }
+      }
+    },
+    "/v1/charges/search": {
+      "get": {
+        "tags": ["Charges"],
+        "operationId": "chargesSearch",
+        "summary": "Search charges (for failure / status / date filtering).",
+        "description": "Use Stripe search DSL: `status:'failed'`, `created>=1700000000`, `customer:'cus_xxx'`, `amount>=10000`. Combine with AND.",
+        "parameters": [
+          { "name": "query", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "$ref": "#/components/parameters/Limit" },
+          { "name": "page", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChargeSearchResult" } } } }
+        }
+      }
+    },
+    "/v1/refunds": {
+      "post": {
+        "tags": ["Refunds"],
+        "operationId": "refundsCreate",
+        "summary": "Refund a charge in part or in full.",
+        "description": "Pass `charge` (ch_*) and optionally `amount` in minor units. Omit `amount` to refund in full. **Money-moving — always confirm with the user before calling.**",
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/RefundInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Refunded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Refund" } } } }
+        }
+      }
+    },
+    "/v1/payouts": {
+      "get": {
+        "tags": ["Payouts"],
+        "operationId": "payoutsList",
+        "summary": "List payouts to your bank account.",
+        "description": "Use to answer 'when does the next payout arrive' (sort by `arrival_date` desc, take first with `status: \"pending\"` or `\"in_transit\"`).",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["paid", "pending", "in_transit", "canceled", "failed"] } },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PayoutList" } } } }
+        }
+      }
+    },
+    "/v1/balance": {
+      "get": {
+        "tags": ["Balance"],
+        "operationId": "balanceGet",
+        "summary": "Get your current platform balance (available + pending).",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Balance" } } } }
+        }
+      }
+    },
+    "/v1/products": {
+      "get": {
+        "tags": ["Catalogue"],
+        "operationId": "productsList",
+        "summary": "List products in your catalogue.",
+        "parameters": [
+          { "name": "active", "in": "query", "schema": { "type": "boolean" } },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductList" } } } }
+        }
+      }
+    },
+    "/v1/prices": {
+      "get": {
+        "tags": ["Catalogue"],
+        "operationId": "pricesList",
+        "summary": "List prices in your catalogue.",
+        "description": "Pass `product` to filter to one product's prices. Use `pricesList` then pick a price id when creating a payment link or subscription.",
+        "parameters": [
+          { "name": "product", "in": "query", "schema": { "type": "string" } },
+          { "name": "active", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["one_time", "recurring"] } },
+          { "$ref": "#/components/parameters/Limit" },
+          { "$ref": "#/components/parameters/StartingAfter" }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PriceList" } } } }
+        }
+      }
+    },
+    "/v1/payment_links": {
+      "post": {
+        "tags": ["PaymentLinks"],
+        "operationId": "paymentLinksCreate",
+        "summary": "Create a hosted Stripe payment link.",
+        "description": "Returns a `url` you can email or share. `line_items` must reference existing Price ids — if you don't have one yet, create a Product + Price first via the Stripe dashboard. For ad-hoc one-shot invoices prefer `invoiceItemsCreate` + `invoicesCreate` with `auto_advance: true`.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/x-www-form-urlencoded": { "schema": { "$ref": "#/components/schemas/PaymentLinkInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentLink" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": { "type": "http", "scheme": "bearer", "description": "Stripe Connect access token (acts as the connected account's secret key)." }
+    },
+    "parameters": {
+      "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }, "description": "Page size, max 100." },
+      "StartingAfter": { "name": "starting_after", "in": "query", "schema": { "type": "string" }, "description": "Cursor — pass the id of the last item from the previous page to get the next page." },
+      "CustomerId": { "name": "customer", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Customer id, e.g. `cus_NffrFeUfNV2Hib`." },
+      "SubscriptionId": { "name": "subscription_exposed_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Subscription id, e.g. `sub_1MowQVLkdIwHu7ix`." },
+      "InvoiceId": { "name": "invoice", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Invoice id, e.g. `in_1MtHbELkdIwHu7ix`." }
+    },
+    "schemas": {
+      "Customer": {
+        "type": "object",
+        "description": "A customer record. The parent of subscriptions, invoices, and charges.",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `cus_*`." },
+          "object": { "type": "string", "enum": ["customer"] },
+          "email": { "type": "string", "nullable": true },
+          "name": { "type": "string", "nullable": true },
+          "phone": { "type": "string", "nullable": true },
+          "balance": { "type": "integer", "description": "Account credit balance in minor units. Negative = customer owes money." },
+          "currency": { "type": "string", "nullable": true, "description": "Three-letter ISO code, e.g. `usd`." },
+          "delinquent": { "type": "boolean", "description": "TRUE if the customer's most recent invoice attempt failed and hasn't been resolved. The headline 'is this customer up to date' field." },
+          "default_source": { "type": "string", "nullable": true },
+          "invoice_prefix": { "type": "string" },
+          "created": { "type": "integer", "description": "Unix timestamp seconds." },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "discount": { "type": "object", "nullable": true }
+        }
+      },
+      "CustomerInput": {
+        "type": "object",
+        "description": "Form fields for create/update.",
+        "properties": {
+          "email": { "type": "string" },
+          "name": { "type": "string" },
+          "phone": { "type": "string" },
+          "description": { "type": "string" },
+          "balance": { "type": "integer", "description": "Override the customer's credit balance in minor units (rare — usually let Stripe manage)." },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Arbitrary string→string tags. Pass `metadata: {key: \"\"}` to delete a key." }
+        }
+      },
+      "CustomerList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } },
+          "has_more": { "type": "boolean" },
+          "url": { "type": "string" }
+        }
+      },
+      "CustomerSearchResult": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["search_result"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } },
+          "has_more": { "type": "boolean" },
+          "next_page": { "type": "string", "nullable": true },
+          "total_count": { "type": "integer", "nullable": true, "description": "Only present when explicitly requested via `expand[]=total_count`." }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `sub_*`." },
+          "object": { "type": "string", "enum": ["subscription"] },
+          "customer": { "type": "string", "description": "Customer id `cus_*`." },
+          "status": { "type": "string", "enum": ["active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired", "trialing", "paused"], "description": "Headline health field. `past_due` and `unpaid` mean dunning; `paused` means collection paused; `canceled` means terminated." },
+          "items": { "$ref": "#/components/schemas/SubscriptionItemList" },
+          "current_period_start": { "type": "integer" },
+          "current_period_end": { "type": "integer", "description": "Unix seconds — when the next invoice will issue." },
+          "cancel_at_period_end": { "type": "boolean", "description": "TRUE if scheduled for graceful churn at `current_period_end`." },
+          "canceled_at": { "type": "integer", "nullable": true },
+          "trial_end": { "type": "integer", "nullable": true },
+          "collection_method": { "type": "string", "enum": ["charge_automatically", "send_invoice"] },
+          "default_payment_method": { "type": "string", "nullable": true },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "latest_invoice": { "type": "string", "nullable": true, "description": "Most recent invoice id `in_*`." },
+          "pause_collection": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "behavior": { "type": "string", "enum": ["keep_as_draft", "mark_uncollectible", "void"] },
+              "resumes_at": { "type": "integer", "nullable": true }
+            }
+          }
+        }
+      },
+      "SubscriptionInput": {
+        "type": "object",
+        "properties": {
+          "cancel_at_period_end": { "type": "boolean", "description": "Set true for graceful churn (still billable until period end)." },
+          "default_payment_method": { "type": "string" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/SubscriptionItemInput" }, "description": "Pass to swap plan/quantity. Each item: `{id, price, quantity, deleted}`. `deleted: true` removes a line." },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "pause_collection": {
+            "type": "object",
+            "properties": {
+              "behavior": { "type": "string", "enum": ["keep_as_draft", "mark_uncollectible", "void"] },
+              "resumes_at": { "type": "integer" }
+            }
+          },
+          "proration_behavior": { "type": "string", "enum": ["create_prorations", "none", "always_invoice"], "description": "How to handle mid-cycle changes. Default `create_prorations`." }
+        }
+      },
+      "SubscriptionItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `si_*`." },
+          "price": { "$ref": "#/components/schemas/Price" },
+          "quantity": { "type": "integer" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "SubscriptionItemInput": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Existing item id (omit when adding a new line)." },
+          "price": { "type": "string", "description": "Price id `price_*`." },
+          "quantity": { "type": "integer" },
+          "deleted": { "type": "boolean" }
+        }
+      },
+      "SubscriptionItemList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/SubscriptionItem" } }
+        }
+      },
+      "SubscriptionList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Subscription" } },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "Invoice": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `in_*`." },
+          "object": { "type": "string", "enum": ["invoice"] },
+          "customer": { "type": "string" },
+          "subscription": { "type": "string", "nullable": true },
+          "status": { "type": "string", "enum": ["draft", "open", "paid", "uncollectible", "void"] },
+          "amount_due": { "type": "integer", "description": "Minor units." },
+          "amount_paid": { "type": "integer" },
+          "amount_remaining": { "type": "integer" },
+          "currency": { "type": "string" },
+          "attempt_count": { "type": "integer", "description": "How many dunning attempts have been made." },
+          "attempted": { "type": "boolean" },
+          "auto_advance": { "type": "boolean" },
+          "collection_method": { "type": "string", "enum": ["charge_automatically", "send_invoice"] },
+          "due_date": { "type": "integer", "nullable": true },
+          "hosted_invoice_url": { "type": "string", "nullable": true, "description": "Public Stripe-hosted page where the customer can pay." },
+          "invoice_pdf": { "type": "string", "nullable": true },
+          "number": { "type": "string", "nullable": true, "description": "Human-readable invoice number." },
+          "paid": { "type": "boolean" },
+          "period_start": { "type": "integer" },
+          "period_end": { "type": "integer" },
+          "total": { "type": "integer" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "InvoiceCreateInput": {
+        "type": "object",
+        "required": ["customer"],
+        "properties": {
+          "customer": { "type": "string", "description": "Customer id `cus_*`." },
+          "auto_advance": { "type": "boolean", "description": "TRUE → Stripe finalises and attempts collection automatically. FALSE (default) → invoice stays as a draft until you call `invoicesPay` or finalise it via the dashboard." },
+          "collection_method": { "type": "string", "enum": ["charge_automatically", "send_invoice"] },
+          "days_until_due": { "type": "integer", "description": "Required if `collection_method: send_invoice`." },
+          "description": { "type": "string" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "InvoicePayInput": {
+        "type": "object",
+        "properties": {
+          "payment_method": { "type": "string", "description": "Payment method id (`pm_*`) to charge — defaults to the customer's default." },
+          "off_session": { "type": "boolean", "description": "TRUE for unattended collection (no SCA challenge possible)." }
+        }
+      },
+      "InvoiceList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Invoice" } },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "InvoiceItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "type": "string", "enum": ["invoiceitem"] },
+          "customer": { "type": "string" },
+          "amount": { "type": "integer" },
+          "currency": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "invoice": { "type": "string", "nullable": true, "description": "Set once the item has been included in an invoice." },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "price": { "$ref": "#/components/schemas/Price" },
+          "quantity": { "type": "integer" }
+        }
+      },
+      "InvoiceItemInput": {
+        "type": "object",
+        "required": ["customer"],
+        "properties": {
+          "customer": { "type": "string" },
+          "amount": { "type": "integer", "description": "Minor units. Provide either `amount` + `currency` OR `price`." },
+          "currency": { "type": "string" },
+          "price": { "type": "string", "description": "Price id `price_*`." },
+          "quantity": { "type": "integer" },
+          "description": { "type": "string" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "Charge": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `ch_*`." },
+          "object": { "type": "string", "enum": ["charge"] },
+          "customer": { "type": "string", "nullable": true },
+          "amount": { "type": "integer" },
+          "amount_captured": { "type": "integer" },
+          "amount_refunded": { "type": "integer" },
+          "currency": { "type": "string" },
+          "status": { "type": "string", "enum": ["succeeded", "pending", "failed"] },
+          "paid": { "type": "boolean" },
+          "refunded": { "type": "boolean" },
+          "captured": { "type": "boolean" },
+          "failure_code": { "type": "string", "nullable": true, "description": "Decline code, e.g. `card_declined`, `insufficient_funds`, `expired_card`." },
+          "failure_message": { "type": "string", "nullable": true },
+          "outcome": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "network_status": { "type": "string", "nullable": true },
+              "reason": { "type": "string", "nullable": true },
+              "risk_level": { "type": "string", "nullable": true },
+              "risk_score": { "type": "integer", "nullable": true },
+              "seller_message": { "type": "string", "nullable": true },
+              "type": { "type": "string", "enum": ["authorized", "manual_review", "issuer_declined", "blocked", "invalid"] }
+            }
+          },
+          "payment_intent": { "type": "string", "nullable": true },
+          "payment_method": { "type": "string", "nullable": true },
+          "payment_method_details": { "type": "object", "nullable": true },
+          "receipt_url": { "type": "string", "nullable": true },
+          "created": { "type": "integer" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "ChargeList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Charge" } },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "ChargeSearchResult": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["search_result"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Charge" } },
+          "has_more": { "type": "boolean" },
+          "next_page": { "type": "string", "nullable": true }
+        }
+      },
+      "Refund": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `re_*`." },
+          "object": { "type": "string", "enum": ["refund"] },
+          "charge": { "type": "string" },
+          "amount": { "type": "integer" },
+          "currency": { "type": "string" },
+          "status": { "type": "string", "enum": ["succeeded", "pending", "failed", "canceled"] },
+          "reason": { "type": "string", "nullable": true, "enum": [null, "duplicate", "fraudulent", "requested_by_customer"] },
+          "created": { "type": "integer" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "RefundInput": {
+        "type": "object",
+        "required": ["charge"],
+        "properties": {
+          "charge": { "type": "string", "description": "Charge id `ch_*` to refund." },
+          "amount": { "type": "integer", "description": "Minor units. Omit to refund in full." },
+          "reason": { "type": "string", "enum": ["duplicate", "fraudulent", "requested_by_customer"] },
+          "refund_application_fee": { "type": "boolean" },
+          "reverse_transfer": { "type": "boolean" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "Payout": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `po_*`." },
+          "object": { "type": "string", "enum": ["payout"] },
+          "amount": { "type": "integer" },
+          "arrival_date": { "type": "integer", "description": "Unix seconds — date funds land in your bank." },
+          "currency": { "type": "string" },
+          "status": { "type": "string", "enum": ["paid", "pending", "in_transit", "canceled", "failed"] },
+          "method": { "type": "string", "enum": ["standard", "instant"] },
+          "type": { "type": "string", "enum": ["bank_account", "card"] },
+          "description": { "type": "string", "nullable": true },
+          "created": { "type": "integer" }
+        }
+      },
+      "PayoutList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Payout" } },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "Balance": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["balance"] },
+          "available": { "type": "array", "items": { "$ref": "#/components/schemas/BalanceAmount" }, "description": "Funds you can pay out NOW, broken down by currency." },
+          "pending": { "type": "array", "items": { "$ref": "#/components/schemas/BalanceAmount" }, "description": "Funds in flight (recently captured charges still settling)." },
+          "livemode": { "type": "boolean" }
+        }
+      },
+      "BalanceAmount": {
+        "type": "object",
+        "properties": {
+          "amount": { "type": "integer", "description": "Minor units." },
+          "currency": { "type": "string" },
+          "source_types": { "type": "object" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `prod_*`." },
+          "object": { "type": "string", "enum": ["product"] },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "active": { "type": "boolean" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "created": { "type": "integer" }
+        }
+      },
+      "ProductList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "Price": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `price_*`." },
+          "object": { "type": "string", "enum": ["price"] },
+          "product": { "type": "string", "description": "Product id `prod_*`." },
+          "active": { "type": "boolean" },
+          "currency": { "type": "string" },
+          "unit_amount": { "type": "integer", "nullable": true, "description": "Minor units." },
+          "type": { "type": "string", "enum": ["one_time", "recurring"] },
+          "recurring": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "interval": { "type": "string", "enum": ["day", "week", "month", "year"] },
+              "interval_count": { "type": "integer" },
+              "usage_type": { "type": "string", "enum": ["licensed", "metered"] }
+            }
+          },
+          "nickname": { "type": "string", "nullable": true },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "PriceList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "enum": ["list"] },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Price" } },
+          "has_more": { "type": "boolean" }
+        }
+      },
+      "PaymentLink": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Prefixed `plink_*`." },
+          "object": { "type": "string", "enum": ["payment_link"] },
+          "url": { "type": "string", "description": "Public URL — share this with the customer." },
+          "active": { "type": "boolean" },
+          "currency": { "type": "string" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "PaymentLinkInput": {
+        "type": "object",
+        "required": ["line_items"],
+        "properties": {
+          "line_items": {
+            "type": "array",
+            "description": "Each line: `{price: \"price_*\", quantity: 1}`.",
+            "items": {
+              "type": "object",
+              "required": ["price", "quantity"],
+              "properties": {
+                "price": { "type": "string" },
+                "quantity": { "type": "integer", "minimum": 1 },
+                "adjustable_quantity": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "minimum": { "type": "integer" },
+                    "maximum": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } },
+          "after_completion": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["hosted_confirmation", "redirect"] },
+              "redirect": { "type": "object", "properties": { "url": { "type": "string" } } }
+            }
+          },
+          "allow_promotion_codes": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
