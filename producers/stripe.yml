@@ -1,0 +1,14 @@
+# Virtual-join producers (see specs/VIRTUAL_CYPHER.md). Batch-keyed via Stripe's
+# search query language: the anchor emails are OR-ed into one /v1/customers/search
+# call (`email:"a" OR email:"b"`), so a traversal over many people costs one call.
+- name: customersByEmail
+  kind: api
+  operation: customersSearch        # GET /v1/customers/search (query)
+  records: "$.data[*]"
+  args:
+    query: "{keys}"
+  keyTemplate: 'email:"{key}"'
+  keyJoin: " OR "
+  cache:
+    kind: ttl
+    seconds: 300

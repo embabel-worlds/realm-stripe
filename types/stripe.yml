@@ -1,0 +1,28 @@
+# Stripe customers, fetched ON DEMAND (not mirrored). A customer is reached from a
+# canonical :Person by shared email (id-match), materialized transiently for the
+# query, then rolled back — the same pattern as the HubSpot pack. No identity
+# bridge needed: Stripe customers carry an email, so they anchor on Person directly.
+# See specs/VIRTUAL_CYPHER.md.
+#
+#   MATCH (p:Person {email:'x@y.com'})-[:HAS_STRIPE_CUSTOMER]->(c:StripeCustomer)
+#   RETURN c.balance, c.currency
+- name: StripeCustomer
+  visibility: internal
+  userAnchor: false
+  description: "A Stripe customer, fetched on demand and linked to a canonical Person by email."
+  virtualJoins:
+    - anchorLabel: Person
+      relationship: HAS_STRIPE_CUSTOMER
+      keyField: email          # Person.email
+      recordKeyField: email    # customer record's email (id-match)
+      producer: customersByEmail
+  properties:
+    id:
+      description: "Stripe customer id (cus_…) — identity."
+      metadata:
+        identity: "true"
+    email: "Customer email."
+    name: "Customer name."
+    description: "Customer description."
+    balance: "Account balance, in the smallest currency unit."
+    currency: "Default ISO currency code."
