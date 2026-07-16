@@ -1,6 +1,6 @@
 ---
 name: stripe
-description: Stripe billing workflows — checking customer health (delinquent / past_due), reading subscription status and MRR, listing/paying invoices, refunding charges, generating payment links, reading payouts and platform balance. Activate this skill BEFORE making any Stripe call when the user asks about customers, subscriptions, invoices, charges, refunds, payouts, balance, MRR, ARR, dunning, churn, or anything in Stripe.
+description: Stripe billing — customers, subscriptions, MRR, invoices, refunds, payment links, payouts, balance. Activate BEFORE any Stripe call; it returns the namespace and rules to follow.
 ---
 
 # Stripe Workflows
