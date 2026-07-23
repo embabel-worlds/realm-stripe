@@ -10,7 +10,7 @@ description: Stripe billing — customers, subscriptions, MRR, invoices, refunds
 Calls go through `gateway.stripe.<method>(args)` from inside `execute_javascript`
 or `execute_python`. Never call them as top-level tools.
 
-If a call returns `gateway.stripe.foo is not a workspace tool`, the error lists every
+If a call returns `gateway.stripe.foo is not a world tool`, the error lists every
 valid method — pick from it. Never re-send the same call.
 
 ## Cardinal rules
@@ -234,5 +234,5 @@ for (const a of b.pending)   console.log(`Pending:   ${a.amount/100} ${a.currenc
 - **Customer search is eventually consistent** — a customer created via `customersCreate` may not appear in `customersSearch` for ~1 second. Don't search-then-create-if-missing in tight loops.
 - **Currency is always lowercase.** `"usd"`, not `"USD"`.
 - **`price.unit_amount` can be null** for tiered or per-unit metered prices — handle the null branch when summing.
-- **Never create raw `Charge` objects.** Modern Stripe flows go through Invoices, Subscriptions, or PaymentIntents. This pack only exposes Charges as read.
+- **Never create raw `Charge` objects.** Modern Stripe flows go through Invoices, Subscriptions, or PaymentIntents. This realm only exposes Charges as read.
 - **`subscription_exposed_id` is the path param name** for the Subscription endpoints — Stripe's spec quirk. Pass `{subscription_exposed_id: "sub_xxx"}`, not `{subscription: ...}`, when calling `subscriptionsGet/Update/Cancel`.

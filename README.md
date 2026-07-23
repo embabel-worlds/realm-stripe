@@ -1,21 +1,21 @@
-# pack-stripe
+# realm-stripe
 
 Stripe billing via a hand-curated, vendored OpenAPI 3 spec — the chat-driven
 95% of Stripe's API (customers, subscriptions, invoices, charges, refunds,
 payouts, balance, payment links) typed end-to-end so the LLM never guesses.
 
-> Pack authoring reference: see
-> [`docs/pack-format.md`](https://github.com/embabel/assistant/blob/main/docs/pack-format.md)
-> in the assistant repo for the full pack format spec — vendored
+> Realm authoring reference: see
+> [`docs/realm-format.md`](https://github.com/embabel/assistant/blob/main/docs/realm-format.md)
+> in the assistant repo for the full realm format spec — vendored
 > OpenAPI specs, OAuth2, identity introspection, admin OAuth app
-> registry, and per-workspace overrides are all documented there.
+> registry, and per-world overrides are all documented there.
 
 ## Why
 
 Stripe's official OpenAPI dump is ~600 ops and 100k+ lines. Most of it
 (Issuing, Capital, Connect platform admin, Climate) is irrelevant to billing
 Q&A. Worse: feeding it to an LLM as tool definitions wastes thousands of
-tokens per turn. This pack vendors a curated mini-spec covering the operations
+tokens per turn. This realm vendors a curated mini-spec covering the operations
 that matter for "is ACME up to date?", "what's their MRR?", "refund this
 charge", "send a $5k invoice", "when's our next payout?" — same data, ~3% of
 the prompt.
@@ -64,7 +64,7 @@ registered a Stripe Connect platform yet — show them the next section.
 
 ### For installation admins (one-time setup)
 
-Done once per installation. Every workspace inherits — end users just
+Done once per installation. Every world inherits — end users just
 click Authorize.
 
 > **⚠️ Don't use Stripe Sandboxes for this.** Stripe's newer "Sandbox"
@@ -117,7 +117,7 @@ click Authorize.
 
    - "Express" and "Custom" Connect are intended for marketplace flows
      where the platform fully controls the connected account. For
-     "users bring their own Stripe account" — which is what this pack
+     "users bring their own Stripe account" — which is what this realm
      does — Standard is the only correct choice.
 
 4. **Scopes**
@@ -125,7 +125,7 @@ click Authorize.
    Standard Connect uses one of two scopes — pass the one you want at
    the authorization URL (the framework reads it from `apis/apis.yml`):
 
-   - `read_write` (default in this pack) — full API access. Required for
+   - `read_write` (default in this realm) — full API access. Required for
      refunds, payment links, sending invoices, cancelling subscriptions.
    - `read_only` — read endpoints only. Use this if the installation
      should only browse Stripe data, never write. To switch, edit the
@@ -156,8 +156,8 @@ click Authorize.
    documented [here](https://docs.stripe.com/connect/oauth-reference#post-token)
    ("Use your live or test secret API key as the `client_secret`").
 
-6. **Add them to** `{workspaceBase}/admin/oauth-apps.yml` (the same admin
-   directory that holds `pack-sources.yml`, `themes/`, `hints/`, etc.):
+6. **Add them to** `{worldBase}/admin/oauth-apps.yml` (the same admin
+   directory that holds `realm-sources.yml`, `themes/`, `hints/`, etc.):
 
    ```yaml
    apps:
@@ -166,7 +166,7 @@ click Authorize.
        client-secret: sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
 
-   Hot-reloaded — no restart needed. Every workspace will see "Authorize"
+   Hot-reloaded — no restart needed. Every world will see "Authorize"
    appear in Settings → Connected Services.
 
    **Match the modes.** Test-mode `ca_*` pairs with `sk_test_*`. Live-mode
@@ -184,9 +184,9 @@ click Authorize.
    - Run a test call: ask "what's my Stripe balance?" — you should see
      the LLM call `balanceGet`.
 
-A specific workspace can opt out of the installation default and point at
+A specific world can opt out of the installation default and point at
 its own Stripe Connect platform by writing the same shape to
-`<workspace>/config/oauth-apps.yml` — useful if a team needs a different
+`<world>/config/oauth-apps.yml` — useful if a team needs a different
 brand on Stripe's consent screen.
 
 ### Token lifetime
@@ -201,10 +201,10 @@ Settings → Connected Services.
 
 ### Webhooks (optional)
 
-This pack covers request/response API calls only. If you want event-driven
+This realm covers request/response API calls only. If you want event-driven
 workflows (notify on `invoice.payment_failed`, ping on `customer.subscription.deleted`),
 configure a Stripe webhook endpoint pointing at your assistant's webhook
-ingest URL — that's outside this pack's scope, but a separate pack or
+ingest URL — that's outside this realm's scope, but a separate realm or
 the assistant's built-in webhook tools can subscribe.
 
 ## Object types covered
@@ -230,7 +230,7 @@ key gives you a fully populated environment with cards (`4242 4242 4242 4242`
 for success, `4000 0000 0000 9995` for `insufficient_funds`, etc.) and zero
 real-money risk. See <https://stripe.com/docs/testing> for the full deck.
 
-## What's NOT in this pack
+## What's NOT in this realm
 
 To keep the spec small, these are out of scope:
 
@@ -242,6 +242,6 @@ To keep the spec small, these are out of scope:
 - **Webhook subscription management** — out-of-band; configure in dashboard
 - **Files API** — uploading dispute evidence etc; rarely needed in chat
 - **Direct `Charge` creation** — modern flows go through Invoices,
-  Subscriptions, or PaymentIntents, all of which this pack covers
+  Subscriptions, or PaymentIntents, all of which this realm covers
 - **Payment Methods CRUD** — customers manage these via Stripe-hosted
-  billing portal; the pack reads them indirectly via Customer / Charge
+  billing portal; the realm reads them indirectly via Customer / Charge
