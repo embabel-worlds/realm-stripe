@@ -3,6 +3,7 @@ description: "Stripe — typed via a curated, vendored OpenAPI 3 spec covering t
 version: 0.2.0
 author: Rod Johnson
 url: https://github.com/johnsonr/realm-stripe
+category: finance
 tags:
   - integrations
   - finance
